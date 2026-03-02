@@ -15,7 +15,7 @@ import time, logging
 
 import pytest
 
-log = logging.getLogger(__name__)
+log = logging.getLogger('forge')
 
 from src.clientsupport.mock_server import DISCOVER, REQUEST
 from src.clientsupport.packet_inspector import (

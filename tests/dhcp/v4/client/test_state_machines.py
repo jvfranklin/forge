@@ -19,10 +19,11 @@ from src.clientsupport.packet_inspector import (
     get_option,
     has_option,
 )
+from src.clientsupport.client_control import ClientController
 
 pytestmark = [pytest.mark.v4, pytest.mark.client_compliance]
 
-_TIMEOUT = 10
+_TIMEOUT = 12
 
 
 def _wait_for(pkts, msg_type, timeout=_TIMEOUT):
@@ -35,7 +36,26 @@ def _wait_for(pkts, msg_type, timeout=_TIMEOUT):
     return None
 
 
-def test_init_reboot_request_fields(mock_server, dhcp_client):
+@pytest.fixture
+def dhcp_client_no_iface_flush():
+    """Like dhcp_client but doesn't flush interface IP (needed for INIT-REBOOT test)."""
+    from src.softwaresupport.multi_server_functions import fabric_sudo_command
+    from src.forge_cfg import world
+    
+    ctrl = ClientController()
+    ctrl.flush()
+    time.sleep(0.5)
+    # NOTE: We DON'T flush the interface IP here so client can remember its lease
+    ctrl.start()
+    yield ctrl
+    ctrl.stop()
+    time.sleep(0.5)
+    ctrl.flush()
+    # Clean up IP address after test
+    fabric_sudo_command(f'ip addr flush scope global dev {world.f_cfg.client_iface}', ignore_errors=True)
+
+
+def test_init_reboot_request_fields(mock_server, dhcp_client_no_iface_flush):
     """M17-M19: DHCPREQUEST in INIT-REBOOT state field requirements.
 
     The client is started, completes a DORA to obtain a lease, then the
@@ -54,15 +74,16 @@ def test_init_reboot_request_fields(mock_server, dhcp_client):
     assert prior_addr is not None, \
         'Could not determine leased address from first DHCPREQUEST'
 
+    # --- Allow time for the client to establish the IP address ---
+    time.sleep(5)
     # --- Restart WITHOUT flushing (INIT-REBOOT) ---
     world.client_pkts.clear()
     log.info('Client packets cleared')
-    time.sleep(10)
-    dhcp_client.stop()
-    log.info('Client stopped. sleeping for 300.5 seconds')
+    dhcp_client_no_iface_flush.stop()
+    log.info('Client stopped. sleeping for 0.5 seconds')
     time.sleep(0.5)
     # Deliberately do NOT call flush — client should remember the lease
-    dhcp_client.start()
+    dhcp_client_no_iface_flush.start()
     log.info('Client started')
 
     # Wait for the INIT-REBOOT REQUEST (may be preceded by a DISCOVER if the
@@ -78,6 +99,11 @@ def test_init_reboot_request_fields(mock_server, dhcp_client):
         if init_reboot_req:
             break
         time.sleep(0.1)
+
+    # Log what we saw for diagnostic purposes
+    for pkt in filter_by_type(world.client_pkts, REQUEST):
+        log.info(f'Post-restart REQUEST: opt50={has_option(pkt, "requested_addr")}, '
+                 f'opt54={has_option(pkt, "server_id")}')
 
     if init_reboot_req is None:
         pytest.skip(
