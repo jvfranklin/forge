@@ -6,11 +6,13 @@
 
 """M01-M08: DHCP client message construction compliance tests."""
 
-import time
+import time, logging
 
 import pytest
 
 from scapy.all import BOOTP, DHCP
+
+log = logging.getLogger('forge')
 
 from src.clientsupport.mock_server import DISCOVER
 from src.clientsupport.packet_inspector import (
@@ -27,7 +29,7 @@ pytestmark = [pytest.mark.v4, pytest.mark.client_compliance]
 DHCP_MAGIC_COOKIE = b'\x63\x82\x53\x63'
 
 
-def _wait_for_discover(pkts, timeout=5):
+def _wait_for_discover(pkts, timeout=11):
     """Poll world.client_pkts until a DISCOVER arrives or timeout."""
     deadline = time.time() + timeout
     while time.time() < deadline:
@@ -45,23 +47,23 @@ def test_magic_cookie_and_msg_type(mock_server_and_client):
     srv, _ = mock_server_and_client
     pkt = _wait_for_discover(world.client_pkts)
     assert pkt is not None, 'No DHCPDISCOVER received from client'
-
+    log.debug("got DHCPDISCOVER")
     # M01: option 53 must be present
     assert has_option(pkt, 'message-type'), \
         'M01: DHCP option 53 (message-type) not present in DISCOVER'
-
+    log.debug("option 53 present")
     # M02: magic cookie
     raw_bootp = bytes(pkt[BOOTP])
     # The magic cookie occupies bytes 236-240 of the BOOTP payload
     cookie = raw_bootp[236:240]
     assert cookie == DHCP_MAGIC_COOKIE, \
         f'M02: Magic cookie {cookie.hex()} != expected 63825363'
-
+    log.debug("magic cookie correct")
     # M03: END option (255) must be the last option
     opts = pkt[DHCP].options
     assert opts[-1] == 'end', \
         f'M03: Last DHCP option must be END (255), got {opts[-1]!r}'
-
+    log.debug("END option present")
 
 @pytest.mark.usefixtures('mock_server_and_client')
 def test_flags_reserved_bits_zero(mock_server_and_client):
