@@ -12,7 +12,7 @@ import pytest
 
 from scapy.all import UDP
 
-from src.clientsupport.mock_server import INFORM
+from src.clientsupport.mock_server import  DISCOVER, REQUEST, INFORM
 from src.clientsupport.packet_inspector import (
     filter_by_type,
     get_option,
@@ -21,8 +21,16 @@ from src.clientsupport.packet_inspector import (
 
 pytestmark = [pytest.mark.v4, pytest.mark.client_compliance]
 
-_TIMEOUT = 10
+_TIMEOUT = 12
 
+def _wait_for(pkts, msg_type, timeout=_TIMEOUT):
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        matches = filter_by_type(pkts, msg_type)
+        if matches:
+            return matches[0]
+        time.sleep(0.1)
+    return None
 
 def test_inform_port_and_no_opt50(mock_server, dhcp_client):
     """M42-M43: DHCPINFORM must be directed to UDP port 67 and must not
@@ -31,7 +39,13 @@ def test_inform_port_and_no_opt50(mock_server, dhcp_client):
     from src.forge_cfg import world
 
     ctrl = dhcp_client
+    discover = _wait_for(world.client_pkts, DISCOVER)
+    assert discover is not None, 'No DHCPDISCOVER received'
 
+    request = _wait_for(world.client_pkts, REQUEST)
+    assert request is not None, 'No DHCPREQUEST received after OFFER'
+
+    time.sleep(4)
     # Trigger DHCPINFORM — skips if CLIENT_INFORM_CMD is not configured
     ctrl.inform()
     time.sleep(2)
